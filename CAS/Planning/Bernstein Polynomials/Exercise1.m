@@ -2,7 +2,8 @@ clear all
 close all
 
 
-
+bebotFolder = fullfile(pwd, '..', 'BeBOT');
+addpath(bebotFolder);
 
 
 
@@ -51,45 +52,6 @@ intu2 = sqrt(T^2+1)-1;
 %% Compute their derivatives 
 %% Compute their integrals
 
-
-N = 10;
-T = 12;
-
-[tnodes, w, Dm] = BeBOT(N,T);
-
-Cp_u1 = u1(tnodes);
-Cp_u2 = u2(tnodes);
-
-u1_N = BernsteinPoly(Cp_u1,t);
-u2_N = BernsteinPoly(Cp_u2, t);
-
-figure(1);
-plot(t, u1_N);
-scatter(tnodes, Cp_u1, 'ko');
-
-figure(2);
-plot(t, u2_N);
-scatter(tnodes, Cp_u2, 'ko');
-
-Cp_u1dot = Cp_u1*Dm;
-Cp_u2dot = Cp_u2*Dm;
-
-u1dot_N = BernsteinPoly(Cp_u1dot,t);
-u2dot_N = BernsteinPoly(Cp_u2dot,t);
-
-figure(3);
-plot(t, u1dot_N);
-scatter(tnodes, Cp_u1dot, 'ko');
-
-figure(4);
-plot(t, u2dot_N);
-scatter(tnodes, Cp_u2dot, 'ko');
-
-int_u1_N = Cp_u1*w
-int_u2_N = Cp_u2*w
-
-error1 = intu1-int_u1_N
-error2 = intu2-int_u2_N
 
 
 

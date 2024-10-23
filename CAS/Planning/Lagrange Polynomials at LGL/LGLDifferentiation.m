@@ -1,6 +1,9 @@
 clear all
 close all
 
+bebotFolder = fullfile(pwd, '..', 'BeBOT');
+addpath(bebotFolder);
+
 %% Define the following functions
 T = 12;
 u1 = @(t) 1./(sqrt(1+(T-t).^2));

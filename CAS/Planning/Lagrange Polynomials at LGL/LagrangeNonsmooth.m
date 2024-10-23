@@ -1,6 +1,9 @@
 clear all
 close all
 
+bebotFolder = fullfile(pwd, '..', 'BeBOT');
+addpath(bebotFolder);
+
 
 %% Define the following function
 syms u(t)

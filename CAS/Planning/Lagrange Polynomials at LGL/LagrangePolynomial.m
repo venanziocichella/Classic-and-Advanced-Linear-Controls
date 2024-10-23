@@ -1,8 +1,12 @@
 clear all
 close all
 
+bebotFolder = fullfile(pwd, '..', 'BeBOT');
+addpath(bebotFolder);
+
 time = 0:0.01:7;
 
+% 1D polynomial
 t_nodes = [0 1 3 5 7];
 xbar = [2 1 -2 -1 3];
 
@@ -12,7 +16,8 @@ figure(1)
 plot(t_nodes,xbar,'o','Linewidth',3,'Color','b'); hold on
 plot(time,xN,'Linewidth',3,'Color','r');
 
-
+% 2D polynomial
+t_nodes = [0 1 3 5 7];
 pbar = [2 1 -2 -1 3; ...
     2 5 9 20 25];
 

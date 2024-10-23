@@ -1,7 +1,10 @@
 clear all
 close all
 
-N = 5; % order
+bebotFolder = fullfile(pwd, '..', 'BeBOT');
+addpath(bebotFolder);
+
+N = 15; % order
 tf = 3;
 
 

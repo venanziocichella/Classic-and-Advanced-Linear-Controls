@@ -1,4 +1,4 @@
-function E = DegElevMatrix(N,M)
+function E = DegRedMatrix(M,N)
 % INPUT: N: Order of the curve to be elevated; M: order to which it has to
 % be elevated;
 % OUTPUT: Elevation matrix E. 
@@ -20,30 +20,9 @@ for i = 1:1:N+1
     end
 end
 
-E = E';
+Eelev = E';
+
+E = pinv(Eelev);
 
 
 end
-
-
-
-
-
-
-
-function binom = nchoosek_mod(N,k)
-% This function produces the same output as MATLAB's nchoosek, but it's more efficient 
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-binom = 1;
-    for j = 1:k
-        binom = binom*(N-(k-j));
-        binom = binom/j;
-    end
-end
-
-
-
-
-

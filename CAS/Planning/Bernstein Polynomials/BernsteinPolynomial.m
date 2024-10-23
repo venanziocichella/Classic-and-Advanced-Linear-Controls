@@ -1,7 +1,11 @@
 clear all
 close all
 
+bebotFolder = fullfile(pwd, '..', 'BeBOT');
+addpath(bebotFolder);
+
 time = 0:0.01:7;
+
 
 xbar = [0 -2  -1  3];
 
@@ -15,7 +19,7 @@ plot(time,xN,'Linewidth',3,'Color','r');
 
 
 
-%%
+% Animation
 for i = 0 : 500
 
     xbar = [0 -2+0.01*i  -1  3];

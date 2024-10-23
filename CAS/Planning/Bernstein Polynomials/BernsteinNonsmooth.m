@@ -1,6 +1,9 @@
 clear all
 close all
 
+bebotFolder = fullfile(pwd, '..', 'BeBOT');
+addpath(bebotFolder);
+
 N = 500;
 
 %% Define the following function
