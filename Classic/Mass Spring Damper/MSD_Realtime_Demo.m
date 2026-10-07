@@ -1,12 +1,12 @@
-function HA_Realtime_Demo
-%HA_REALTIME_DEMO  Real-time highwire artist: human vs. feedback controller.
+function MSD_Realtime_Demo
+%MSD_REALTIME_DEMO  Real-time mass-spring-damper: human vs. feedback controller.
 %
-%   Run HA_Realtime_Demo and try to keep the artist on the wire yourself by
-%   rotating the balancing pole, then hand it over to the controller designed
-%   in HA_Control_Design.
+%   Run MSD_Realtime_Demo and try to move the mass to the green target (it
+%   jumps to a new position every few seconds), then hand the job over to the
+%   controller designed in MSD_Control_Design / MSD_RootLocus_Design.
 %
-%   Inputs (HUMAN mode = your input is the torque on the pole,
-%           CONTROLLER mode = your input is a disturbance):
+%   Inputs (HUMAN mode = your input is the force on the mass,
+%           CONTROLLER mode = your input is a disturbance force):
 %     Joystick/gamepad : left stick X axis. Press any button once so the
 %                        browser engine detects it.
 %                        Button 1 = switch Human/Controller, Button 2 = reset.
@@ -14,96 +14,81 @@ function HA_Realtime_Demo
 %     Keyboard         : Left/Right arrows.
 %   Keys: H = human, C = controller, R = reset, Space = pause.
 %
-%   Uses only core MATLAB (uifigure, uihtml, hgtransform). No Simulink or
-%   toolboxes are needed. The joystick is read through the standard browser
-%   Gamepad API inside a uihtml component (R2019b or newer).
+%   Uses only core MATLAB (uifigure, uihtml). No Simulink or toolboxes are
+%   needed. The joystick is read through the standard browser Gamepad API
+%   inside a uihtml component (R2019b or newer).
 
-%% Parameters (edit freely, same values as HA_Control_Design.m)
-J = 10.4;           % pole inertia [kg m^2]
-l = 1.5;            % pole parameter [m]
-L = 2;              % artist center of mass height [m]
-m = 5;              % pole mass [kg]
-M = 75;             % artist mass [kg]
-g = 9.81;           % gravity [m/s^2]
-theta0 = pi/1000;   % initial tilt after a reset [rad] (as in HA_sim.slx)
-fallAngle = 45*pi/180;  % beyond this the artist falls off the wire [rad]
-uHumanMax = 600;    % torque at full stick / full mouse deflection [N m]
-uCtrlMax  = 3000;   % controller saturation [N m]
-distScale = 0.3;    % your input is scaled by this in CONTROLLER mode (disturbance)
+%% Parameters (edit freely, same values as MSD_Control_Design.m)
+m = 1;              % mass [kg]
+b = 8.8;            % damping [N s/m]
+k = 40;             % stiffness [N/m]
+targets = [0.6 -0.4 1 0 -0.8 0.3];  % target positions, visited in order [m]
+targetPeriod = 4;   % seconds before the target moves
+tol = 0.05;         % "on target" band [m]
+uHumanMax = 60;     % force at full stick / full mouse deflection [N]
+uCtrlMax  = 300;    % controller saturation [N]
+distScale = 0.5;    % your input is scaled by this in CONTROLLER mode (disturbance)
 
 % Controller: write any proper transfer function in s.
-% Error e = 0 - theta, pole torque u = C(s) e.
+% Error e = r - x (target minus position), force u = C(s) e.
 % SimpleTF (in this folder) needs no toolbox; s = tf('s') works too.
 s = SimpleTF.s;
-C = 3000*(s+2)/(s+5);   % lead compensator from HA_Control_Design.m
-% C = 3000*(s+2)*(s+0.5)/(s*(s+5));   % lead + integrator from HA_RootLocus_Design.m
+C = 100*(1 + 3/s);                          % PI from MSD_Control_Design.m
+% C = 20*(s+4)*(s+6)/(s*(s/100+1));         % PID from MSD_RootLocus_Design.m
 [numC, denC] = tfdata(C, 'v');
 
-%% Plant (same equations as the HA_sim.slx subsystem), state x = [theta; theta'; psi; psi']
-%   theta: artist tilt from vertical, psi: pole angle, u: torque on the pole
-% (linearization: G(s) = 6/(6*m*l^2+2*M*L^2)/(s^2-3*g*(2*m*l+M*L)/(6*m*l^2+2*M*L^2)))
-Dth = 6*m*l^2 + 2*M*L^2;
-kg = 3*g*(2*m*l + M*L);
-Dpsi = 2*J*(3*m*l^2 + M*L^2);
-kpsi = 2*(3*J + 3*m*l^2 + M*L^2);
-plant = @(x, u) [x(2); (kg*sin(x(1)) + 6*u)/Dth; x(4); (-kg*sin(x(1)) - kpsi*u)/Dpsi];
+%% Plant: m x'' + b x' + k x = u,  G(s) = 1/(m s^2 + b s + k)
+plant = @(x, u) [x(2); (u - b*x(2) - k*x(1))/m];
 
 [Ac, Bc, Cc, Dc] = localTf2ss(numC, denC);
 nc = size(Ac, 1);
 
 %% State
-x = [theta0; 0; 0; 0];   % [theta; theta_dot; psi; psi_dot]
+x = [0; 0];        % [position; velocity]
 xc = zeros(nc, 1); % controller states
 mode = 'human';    % 'human' or 'controller'
 paused = false;
-fallen = false;
-tUp = 0;           % time upright since last reset/mode change
-bestHuman = 0;
+fallen = false;    % (never true here: the mass cannot fall)
+tUp = 0;           % time since last reset/mode change
+tOn = 0;           % time spent within tol of the target
+bestHuman = 0;     % best human "on target" percentage
+iTarget = 1; r = targets(1);
 keyIn = 0; mouseIn = 0; mouseDown = false;
 lastButtons = [];
 speed = 1;
 dt = 1e-3;         % integration step [s]
 
 %% UI
-fig = uifigure('Name', 'Highwire Artist: Human vs Controller', ...
+fig = uifigure('Name', 'Mass Spring Damper: Human vs Controller', ...
     'Position', [100 100 1000 620], 'Color', 'w');
 gl = uigridlayout(fig, [1 2]);
 gl.ColumnWidth = {'1x', 260};
 
 ax = uiaxes(gl);
 axis(ax, 'equal'); hold(ax, 'on');
-H = 2*L;            % drawn artist height [m]
-hp = 2.5;           % height of the hands (pole center) [m]
-ax.XLim = [-5 5]; ax.YLim = [-2.3 6];
-ax.XTick = []; ax.YTick = []; ax.Box = 'on';
+ax.XLim = [-2.1 1.9]; ax.YLim = [-1.0 1.0];
+ax.XTick = -1.5:0.5:1.5; ax.YTick = []; ax.Box = 'on';
 ax.Toolbar.Visible = 'off';
 disableDefaultInteractivity(ax);
 title(ax, '');
+xw = -2;            % wall position [m]
+wB = 0.4; hB = 0.7; % block size [m]
 
-% Static scene: wire between two posts
-plot(ax, [-5 5], [0 0], 'Color', [0.3 0.3 0.3], 'LineWidth', 1.5);
-patch(ax, [-4.9 -4.6 -4.6 -4.9], [-2.3 -2.3 0.3 0.3], [0.6 0.45 0.3], 'EdgeColor', 'none');
-patch(ax, [4.6 4.9 4.9 4.6], [-2.3 -2.3 0.3 0.3], [0.6 0.45 0.3], 'EdgeColor', 'none');
+% Static scene: wall and floor
+patch(ax, [-2.1 xw xw -2.1], [-0.25 -0.25 0.75 0.75], [0.6 0.6 0.6], 'EdgeColor', 'none');
+plot(ax, [xw 1.9], [-0.25 -0.25], 'Color', [0.4 0.4 0.4], 'LineWidth', 2);
+% Target marker
+tgt = patch(ax, r + [-1 1 1 -1]*tol, [-0.25 -0.25 0.65 0.65], [0.47 0.67 0.19], ...
+    'FaceAlpha', 0.25, 'EdgeColor', [0.47 0.67 0.19]);
+% Spring, damper and block (updated every frame)
+spring = plot(ax, 0, 0, 'Color', [0.2 0.2 0.2], 'LineWidth', 2);
+damper = plot(ax, 0, 0, 'Color', [0.2 0.2 0.2], 'LineWidth', 2);
+block = patch(ax, [0 1 1 0], [0 0 1 1], [0.85 0.33 0.1], 'EdgeColor', [0.3 0.3 0.3]);
 % Input gauge
-plot(ax, [-3 3], [-1.6 -1.6], 'Color', [0.85 0.85 0.85], 'LineWidth', 8);
-gauge = plot(ax, [0 0], [-1.6 -1.6], 'LineWidth', 8, 'Color', [0 0.45 0.74]);
-text(ax, -3.2, -1.6, 'torque', 'HorizontalAlignment', 'right', 'FontSize', 10);
-% Artist (drawn upright, rotated about the feet by theta)
-tr = hgtransform('Parent', ax);
-line('Parent', tr, 'XData', [-0.08 0 0.08], 'YData', [0 0.45*H 0], 'LineWidth', 4, 'Color', [0.2 0.2 0.2]);
-line('Parent', tr, 'XData', [0 0], 'YData', [0.45*H 0.85*H], 'LineWidth', 6, 'Color', [0.85 0.33 0.1]);
-line('Parent', tr, 'XData', [-0.45 0 0.45], 'YData', [hp 0.8*H hp], 'LineWidth', 3, 'Color', [0.2 0.2 0.2]);
-th = linspace(0, 2*pi, 40);
-patch('Parent', tr, 'XData', 0.25*cos(th), 'YData', 0.94*H + 0.25*sin(th), ...
-    'FaceColor', [0.95 0.8 0.65], 'EdgeColor', [0.2 0.2 0.2]);
-% Pole (absolute angle psi, centered at the hands)
-trPole = hgtransform('Parent', ax);
-line('Parent', trPole, 'XData', [-3 3], 'YData', [0 0], 'LineWidth', 4, 'Color', [0.4 0.25 0.1]);
-patch('Parent', trPole, 'XData', [-3.2 -2.8 -2.8 -3.2], 'YData', [-0.15 -0.15 0.15 0.15], ...
-    'FaceColor', [0.3 0.3 0.3], 'EdgeColor', 'none');
-patch('Parent', trPole, 'XData', [2.8 3.2 3.2 2.8], 'YData', [-0.15 -0.15 0.15 0.15], ...
-    'FaceColor', [0.3 0.3 0.3], 'EdgeColor', 'none');
-msg = text(ax, 0, 5.6, '', 'HorizontalAlignment', 'center', 'FontSize', 18, ...
+plot(ax, [-1 1], [-0.6 -0.6], 'Color', [0.85 0.85 0.85], 'LineWidth', 8);
+gauge = plot(ax, [0 0], [-0.6 -0.6], 'LineWidth', 8, 'Color', [0 0.45 0.74]);
+text(ax, -1.05, -0.6, 'force', 'HorizontalAlignment', 'right', 'FontSize', 10);
+msg = text(ax, 0, 0.88, '', 'HorizontalAlignment', 'center', 'FontSize', 18, ...
     'FontWeight', 'bold', 'Color', [0.8 0 0]);
 
 % Control panel
@@ -121,8 +106,8 @@ uidropdown(pn, 'Items', {'1x (real time)', '0.5x', '0.25x'}, ...
     'ValueChangedFcn', @(src,~) setSpeed(src.Value));
 uibutton(pn, 'Text', 'Reset  (R)', 'ButtonPushedFcn', @(~,~) reset());
 uibutton(pn, 'Text', 'Pause  (Space)', 'ButtonPushedFcn', @(~,~) togglePause());
-lblTime = uilabel(pn, 'Text', 'Time on the wire: 0.0 s', 'FontSize', 14);
-lblBest = uilabel(pn, 'Text', 'Best human: 0.0 s', 'FontSize', 14);
+lblTime = uilabel(pn, 'Text', 'On target: 0%', 'FontSize', 14);
+lblBest = uilabel(pn, 'Text', 'Best human: 0%', 'FontSize', 14);
 lblJoy = uilabel(pn, 'Text', 'Joystick: press any button', 'WordWrap', 'on');
 lblHelp = uilabel(pn, 'WordWrap', 'on', 'FontColor', [0.4 0.4 0.4], 'Text', ...
     ['Mouse: hold left button and move left/right. ' ...
@@ -174,14 +159,16 @@ end
         xc = xc + h/6*(c1 + 2*c2 + 2*c3 + c4);
         [~, ~, u] = f(x, xc);
         tUp = tUp + h;
-        if abs(x(1)) > fallAngle
-            fallen = true;
-            if strcmp(mode, 'human'), bestHuman = max(bestHuman, tUp); end
+        if abs(x(1) - r) < tol, tOn = tOn + h; end
+        % move the target every targetPeriod seconds
+        if floor(tUp/targetPeriod) ~= floor((tUp - h)/targetPeriod)
+            iTarget = mod(iTarget, numel(targets)) + 1;
+            r = targets(iTarget);
         end
     end
 
     function [dx, dxc, u] = deriv(x, xc, human)
-        e = -x(1);
+        e = r - x(1);
         if strcmp(mode, 'controller')
             uc = Cc*xc + Dc*e;
             uc = max(min(uc, uCtrlMax), -uCtrlMax);
@@ -240,42 +227,52 @@ end
     end
 
     function draw(u, human)
-        tr.Matrix = makehgtform('zrotate', -x(1));
-        trPole.Matrix = makehgtform('translate', [hp*sin(x(1)) hp*cos(x(1)) 0], 'zrotate', x(3));
-        gauge.XData = [0 3*max(min(u/uHumanMax, 1.6), -1.6)];
+        p = x(1);
+        xl = p - wB/2;                        % left face of the block
+        % spring (zigzag) from the wall to the block, upper half
+        n = 12; xs = linspace(xw, xl, 2*n + 1);
+        ys = 0.3 + 0.08*[0 repmat([1 -1], 1, n-1) 1 0]; ys = ys(1:numel(xs));
+        spring.XData = xs; spring.YData = ys;
+        % damper (dashpot) from the wall to the block, lower half:
+        % a cup attached to the wall and a piston attached to the block
+        gap = xl - xw; yd = 0.05; hc = 0.07;
+        c0 = xw + 0.15*gap; c1 = xw + 0.6*gap; pp = xw + 0.45*gap;
+        damper.XData = [xw c0 NaN c1 c0 c0 c1 NaN pp pp NaN pp xl];
+        damper.YData = [yd yd NaN yd+hc yd+hc yd-hc yd-hc NaN yd-0.8*hc yd+0.8*hc NaN yd yd];
+        block.XData = xl + [0 wB wB 0];
+        block.YData = -0.25 + [0 0 hB hB];
+        tgt.XData = r + [-1 1 1 -1]*tol;
+        gauge.XData = [0 max(min(u/uHumanMax, 1.6), -1.6)];
         if strcmp(mode, 'controller')
             gauge.Color = [0.47 0.67 0.19];
         else
             gauge.Color = [0 0.45 0.74];
         end
-        if fallen
-            if strcmp(mode, 'human')
-                msg.String = sprintf('Fell after %.1f s!  Press R', tUp);
-            else
-                msg.String = 'Fell!  Press R';
-            end
-        elseif paused
+        if paused
             msg.String = 'Paused';
         elseif strcmp(mode, 'controller') && human ~= 0
             msg.String = 'Disturbance!';
         else
             msg.String = '';
         end
-        lblTime.Text = sprintf('Time on the wire: %.1f s', tUp);
-        lblBest.Text = sprintf('Best human: %.1f s', bestHuman);
+        lblTime.Text = sprintf('On target: %.0f%%', 100*tOn/max(tUp, eps));
+        lblBest.Text = sprintf('Best human: %.0f%%', bestHuman);
     end
 
     function setJoyText(t)
         if ~strcmp(lblJoy.Text, t), lblJoy.Text = t; end
     end
 
-    function setMode(m)
-        if strcmp(mode, 'human') && ~fallen, bestHuman = max(bestHuman, tUp); end
-        mode = m;
-        btnHuman.Value = strcmp(m, 'human');
-        btnCtrl.Value = strcmp(m, 'controller');
+    function setMode(newMode)
+        if strcmp(mode, 'human') && tUp > targetPeriod
+            bestHuman = max(bestHuman, 100*tOn/tUp);
+        end
+        mode = newMode;
+        btnHuman.Value = strcmp(newMode, 'human');
+        btnCtrl.Value = strcmp(newMode, 'controller');
         xc = zeros(nc, 1);   % start the controller from rest
-        tUp = 0;
+        tUp = 0; tOn = 0;
+        iTarget = 1; r = targets(1);
     end
 
     function setSpeed(v)
@@ -287,10 +284,10 @@ end
     end
 
     function reset()
-        x = [theta0; 0; 0; 0];
+        x = [0; 0];
         xc = zeros(nc, 1);
-        fallen = false;
-        tUp = 0;
+        tUp = 0; tOn = 0;
+        iTarget = 1; r = targets(1);
     end
 
     function togglePause()
